@@ -5,14 +5,15 @@ import time
 import os
 import sys
 import warnings
+import re
 
-# ‼️ New imports to match the official CLI script structure
+
 from importlib.resources import files
 from cached_path import cached_path
 from omegaconf import OmegaConf
 from hydra.utils import get_class
 
-# ‼️ Using the official utility functions instead of manual loading
+
 from f5_tts.infer.utils_infer import (
     infer_process,
     load_model,
@@ -31,13 +32,40 @@ REF_AUDIO = "ref.wav"
 REF_TEXT = "Do you know how many books will be signed and when can we buy them. So I have signed pages and I had to send them to."
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
+
 MODEL_NAME = "F5TTS_Base"
 VOCODER_NAME = "vocos"
-SPEED = 3.0
+SPEED = 1.0
 CROSS_FADE_DURATION = 0.15
 NFE_STEP = 16  # Reduced to 16 for speed (CLI default is 32)
 CFG_STRENGTH = 2.0
 SWAY_SAMPLING_COEF = -1.0
+
+
+def chunk_text(text):
+    """
+    ‼️ Simple helper to split text into sentences for streaming.
+    Splits by . ? ! or newline, keeping the punctuation.
+    """
+    # Split by punctuation followed by space or end of string
+    pattern = r"([.?!:;]+(?:\s+|$))"
+    chunks = re.split(pattern, text)
+
+    # Recombine split parts (text + punctuation)
+    result = []
+    current_chunk = ""
+    for part in chunks:
+        current_chunk += part
+        # If the part ends with punctuation/space, assume it's a complete sentence
+        if re.search(r"[.?!:;]\s*$", part):
+            if current_chunk.strip():
+                result.append(current_chunk.strip())
+            current_chunk = ""
+
+    if current_chunk.strip():
+        result.append(current_chunk.strip())
+
+    return result
 
 
 def main():
@@ -60,16 +88,12 @@ def main():
     # ------------------------------------------------------------------
     print("\n⬇️  Loading Model Configuration...")
 
-    # ‼️ Use importlib to find the config YAML inside the installed package
-    # This matches: str(files("f5_tts").joinpath(f"configs/{model}.yaml"))
     config_path = files("f5_tts").joinpath(f"configs/{MODEL_NAME}.yaml")
     model_cfg = OmegaConf.load(str(config_path))
 
-    # ‼️ Dynamically load the model class (DiT)
     model_cls = get_class(f"f5_tts.model.{model_cfg.model.backbone}")
     model_arc = model_cfg.model.arch
 
-    # ‼️ Determine checkpoint URL logic
     repo_name = "F5-TTS"
     ckpt_step = 1200000
     ckpt_type = "safetensors"  # or 'pt'
@@ -82,19 +106,16 @@ def main():
         )
     )
 
-    # ‼️ Load Vocoder
     print("📦 Loading Vocoder...")
     vocoder = load_vocoder(vocoder_name=VOCODER_NAME, is_local=False, device=DEVICE)
 
-    # ‼️ Load Main Model using the library's built-in loader
-    # This automatically handles vocab, CFM wrapping, and EMA weights
     print(f"📦 Loading {MODEL_NAME}...")
     model = load_model(
         model_cls,
         model_arc,
         ckpt_file,
         mel_spec_type=VOCODER_NAME,
-        vocab_file="",  # Empty string makes it download default vocab.txt
+        vocab_file="",
         device=DEVICE,
     )
 
@@ -110,34 +131,50 @@ def main():
             if not text_to_gen.strip():
                 continue
 
-            print("⏳ Generating...")
-            start_time = time.time()
-
-            # ‼️ Preprocess reference audio (same as CLI)
             final_ref_audio, final_ref_text = preprocess_ref_audio_text(
                 REF_AUDIO, REF_TEXT
             )
 
-            # ‼️ Run Inference
-            audio, sample_rate, spectrogram = infer_process(
-                final_ref_audio,
-                final_ref_text,
-                text_to_gen,
-                model,  # This is the EMA model loaded by load_model
-                vocoder,
-                mel_spec_type=VOCODER_NAME,
-                nfe_step=NFE_STEP,
-                speed=SPEED,
-                cfg_strength=CFG_STRENGTH,
-                sway_sampling_coef=SWAY_SAMPLING_COEF,
-                device=DEVICE,
-            )
+            chunks = chunk_text(text_to_gen)
+            print(f"⏳ Generating {len(chunks)} chunks...")
 
-            gen_time = time.time() - start_time
-            print(f"🔊 Playing... ({gen_time:.2f}s)")
+            total_start = time.time()
 
-            sd.play(audio, sample_rate)
-            sd.wait()
+            # Loop through chunks
+            for i, chunk in enumerate(chunks):
+                if not chunk.strip():
+                    continue
+
+                chunk_start = time.time()
+
+                # Generate audio for THIS chunk
+                audio, sample_rate, spectrogram = infer_process(
+                    final_ref_audio,
+                    final_ref_text,
+                    chunk,
+                    model,
+                    vocoder,
+                    mel_spec_type=VOCODER_NAME,
+                    nfe_step=NFE_STEP,
+                    speed=SPEED,
+                    cfg_strength=CFG_STRENGTH,
+                    sway_sampling_coef=SWAY_SAMPLING_COEF,
+                    device=DEVICE,
+                )
+
+                chunk_time = time.time() - chunk_start
+                print(
+                    f"   ▶️  Playing chunk {i + 1}/{len(chunks)} ({chunk_time:.2f}s gen time)"
+                )
+
+                # sd.play is non-blocking (fire and forget), but we call sd.wait()
+                # AFTER starting the NEXT generation to overlap them.
+                # However, for a simple script, blocking here ensures smooth playback
+                # without race conditions on the audio device.
+                sd.play(audio, sample_rate)
+                sd.wait()  # Block until this chunk finishes playing
+
+            print(f"✅ Done. Total time: {time.time() - total_start:.2f}s")
 
         except KeyboardInterrupt:
             break
@@ -150,3 +187,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
