@@ -4,7 +4,6 @@ import time
 import os
 import warnings
 
-
 from importlib.resources import files
 from cached_path import cached_path
 from omegaconf import OmegaConf
@@ -33,7 +32,7 @@ MODEL_NAME = "F5TTS_Base"
 VOCODER_NAME = "vocos"
 SPEED = 1.0
 CROSS_FADE_DURATION = 0.15
-NFE_STEP = 16  # Reduced to 16 for speed (CLI default is 32)
+NFE_STEP = 32  # Use 16 for speed
 CFG_STRENGTH = 2.0
 SWAY_SAMPLING_COEF = -1.0
 
