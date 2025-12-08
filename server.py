@@ -1,13 +1,8 @@
-import sounddevice as sd
 import torch
-import time
 import os
 import warnings
 import re
-import io
-import numpy as np
 
-# ‼️ ADDED: Networking libraries
 from fastapi import FastAPI, WebSocket
 from contextlib import asynccontextmanager
 import uvicorn
@@ -44,17 +39,15 @@ NFE_STEP = 32
 CFG_STRENGTH = 2.0
 SWAY_SAMPLING_COEF = -1.0
 
-# ‼️ ADDED: Global storage for loaded models
+
 models = {}
 
 
-# ‼️ ADDED: Sentence splitter helper
 def split_into_sentences(text):
     # Splits by punctuation (. ! ?) followed by whitespace
     return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
 
 
-# ‼️ CHANGED: Startup logic moved to lifespan event
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print(f"🚀 Initializing F5-TTS Server on {DEVICE}...")
@@ -93,7 +86,6 @@ async def lifespan(app: FastAPI):
         device=DEVICE,
     )
 
-    # ‼️ ADDED: Store loaded components in global dict
     models["model"] = model
     models["vocoder"] = vocoder
 
@@ -105,7 +97,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 
-# ‼️ ADDED: WebSocket endpoint to handle client communication
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -117,7 +108,6 @@ async def websocket_endpoint(websocket: WebSocket):
             text_to_gen = await websocket.receive_text()
             print(f"\n📝 Received: {text_to_gen}")
 
-            # ‼️ ADDED: Process each sentence individually
             sentences = split_into_sentences(text_to_gen)
 
             # Preprocess reference once
@@ -144,12 +134,10 @@ async def websocket_endpoint(websocket: WebSocket):
                     device=DEVICE,
                 )
 
-                # ‼️ ADDED: Send metadata first (sample rate)
                 await websocket.send_text(
                     json.dumps({"sample_rate": sample_rate, "sentence": sentence})
                 )
 
-                # ‼️ ADDED: Send audio bytes (float32 numpy array -> bytes)
                 await websocket.send_bytes(audio.tobytes())
                 print(f"  📤 Sent audio for sentence {i + 1}")
 
@@ -161,5 +149,5 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 if __name__ == "__main__":
-    # ‼️ ADDED: Start the server (Changed 'server' to 'app')
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
