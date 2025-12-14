@@ -2,6 +2,7 @@ import torch
 import os
 import warnings
 import re
+import gc
 
 from fastapi import FastAPI, WebSocket
 from contextlib import asynccontextmanager
@@ -20,6 +21,8 @@ from f5_tts.infer.utils_infer import (
     preprocess_ref_audio_text,
 )
 
+from faster_whisper import WhisperModel
+
 # Suppress warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
@@ -27,13 +30,13 @@ warnings.filterwarnings("ignore", category=FutureWarning)
 # --------------------------------------------------------
 # CONFIGURATION
 # --------------------------------------------------------
-REF_AUDIO = "ref.wav"
-REF_TEXT = "Do you know how many books will be signed and when can we buy them. So I have signed pages and I had to send them to."
+REF_AUDIO = "ref3.wav"
+REF_TEXT = ""
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 MODEL_NAME = "F5TTS_Base"
 VOCODER_NAME = "vocos"
-SPEED = 1.0
+SPEED = 2.0
 CROSS_FADE_DURATION = 0.15
 NFE_STEP = 32
 CFG_STRENGTH = 2.0
@@ -50,6 +53,7 @@ def split_into_sentences(text):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global REF_TEXT
     print(f"🚀 Initializing F5-TTS Server on {DEVICE}...")
 
     if not os.path.exists(REF_AUDIO):
@@ -58,10 +62,39 @@ async def lifespan(app: FastAPI):
         )
 
         print(
-            "   Please run this command from the directory containing your ref.wav file."
+            "    Please run this command from the directory containing your ref.wav file."
         )
 
-    # Load Model Configuration
+    # -------------------------------------------------------
+    # 1. Automatic Transcription
+    # -------------------------------------------------------
+    print(f"\n🎧 Transcribing '{REF_AUDIO}' using faster-whisper...")
+    try:
+        compute_type = "float16" if DEVICE == "cuda" else "int8"
+        whisper = WhisperModel("medium", device=DEVICE, compute_type=compute_type)
+
+        segments, info = whisper.transcribe(REF_AUDIO, beam_size=5)
+
+        transcribed_text = " ".join([segment.text for segment in segments]).strip()
+
+        if not transcribed_text:
+            raise ValueError("Transcription returned empty text.")
+
+        REF_TEXT = transcribed_text
+        print(f'✅ Transcript detected: "{REF_TEXT}"')
+
+        del whisper
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        print("🧹 Whisper model unloaded and VRAM cleared.")
+
+    except Exception as e:
+        print(f"❌ Transcription failed: {e}")
+
+    # -------------------------------------------------------
+    # 2. Load F5-TTS Model
+    # -------------------------------------------------------
     print("\n⬇️  Loading Model Configuration...")
     config_path = files("f5_tts").joinpath(f"configs/{MODEL_NAME}.yaml")
     model_cfg = OmegaConf.load(str(config_path))
@@ -151,7 +184,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
     except Exception as e:
         print(f"❌ Connection Error: {e}")
-
 
 
 def main():
