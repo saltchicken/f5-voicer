@@ -53,8 +53,13 @@ async def lifespan(app: FastAPI):
     print(f"🚀 Initializing F5-TTS Server on {DEVICE}...")
 
     if not os.path.exists(REF_AUDIO):
-        print(f"\n❌ Error: Could not find '{REF_AUDIO}'")
-        # In a real server, you might want to exit or raise error
+        print(
+            f"\n❌ Error: Could not find '{REF_AUDIO}' in current directory: {os.getcwd()}"
+        )
+
+        print(
+            "   Please run this command from the directory containing your ref.wav file."
+        )
 
     # Load Model Configuration
     print("\n⬇️  Loading Model Configuration...")
@@ -148,6 +153,10 @@ async def websocket_endpoint(websocket: WebSocket):
         print(f"❌ Connection Error: {e}")
 
 
-if __name__ == "__main__":
+
+def main():
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
+
+if __name__ == "__main__":
+    main()

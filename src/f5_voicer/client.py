@@ -5,7 +5,7 @@ import numpy as np
 import json
 import threading
 import queue
-
+import sys
 
 audio_queue = queue.Queue()
 
@@ -29,13 +29,11 @@ def audio_player_thread():
         audio_queue.task_done()
 
 
-# Start the player thread
-player_thread = threading.Thread(target=audio_player_thread, daemon=True)
-player_thread.start()
-
-
 async def communicate():
-    uri = "ws://localhost:8000/ws"
+
+    uri = "ws://127.0.0.1:8000/ws"
+    if len(sys.argv) > 1:
+        uri = sys.argv[1]
 
     print(f"Connecting to {uri}...")
     try:
@@ -74,10 +72,18 @@ async def communicate():
         print(f"❌ Error: {e}")
 
 
-if __name__ == "__main__":
+
+def main():
+    # Start the player thread inside main to avoid side effects on import
+    player_thread = threading.Thread(target=audio_player_thread, daemon=True)
+    player_thread.start()
+
     try:
         asyncio.run(communicate())
     except KeyboardInterrupt:
         print("\nExiting...")
         audio_queue.put(None)  # Signal thread to stop
 
+
+if __name__ == "__main__":
+    main()

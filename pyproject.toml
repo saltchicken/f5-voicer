@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "f5-voicer"
+version = "0.1.0"
+description = "A client-server implementation for F5-TTS"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+f5-server = "f5_voicer.server:main"
+f5-client = "f5_voicer.client:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
